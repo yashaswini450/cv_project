@@ -9,6 +9,13 @@ Given per-vehicle detections, this module applies the traffic violation rules:
 
 For every violating vehicle, it also triggers the OCR pipeline to extract
 the license plate number.
+
+Improvements over v1:
+  - min_rider_score: ignore low-confidence rider detections (reduces FP)
+  - min_riders check: skip overloading check when zero riders detected
+    (probably an empty / parked bike)
+  - helmet_conf_threshold: only count no-helmet riders above a higher
+    confidence threshold to cut false positives in helmet images
 """
 
 from __future__ import annotations
@@ -25,7 +32,15 @@ class ViolationEngine:
     Parameters
     ----------
     triple_riding_threshold : int
-        Number of riders above which triple riding is flagged (default: 2).
+        Number of riders above which triple riding is flagged (default: 2,
+        meaning >2 → triple riding).
+    min_rider_score : float
+        Minimum detection confidence for a rider to be counted.
+        Filters out marginal detections that inflate rider counts.
+    helmet_conf_threshold : float
+        Minimum confidence required to count a 'no-helmet' detection as a
+        helmet violation. Set higher than min_rider_score to reduce FP in
+        images where all riders have helmets.
     run_ocr_on_all : bool
         If True, run OCR on every vehicle even if no violation is detected.
         Useful for audit logging.
@@ -34,9 +49,13 @@ class ViolationEngine:
     def __init__(
         self,
         triple_riding_threshold: int = 2,
+        min_rider_score: float = 0.35,
+        helmet_conf_threshold: float = 0.40,
         run_ocr_on_all: bool = False,
     ):
         self.triple_threshold = triple_riding_threshold
+        self.min_rider_score = min_rider_score
+        self.helmet_conf_threshold = helmet_conf_threshold
         self.run_ocr_on_all = run_ocr_on_all
 
     # ------------------------------------------------------------------ public
@@ -93,20 +112,36 @@ class ViolationEngine:
         img: np.ndarray,
         ocr_reader,
     ) -> Optional[Dict[str, Any]]:
-        riders: List[Dict[str, Any]] = vehicle.get("riders", [])
+        all_riders: List[Dict[str, Any]] = vehicle.get("riders", [])
         vehicle_box: Tuple[int, int, int, int] = vehicle["box"]
 
-        num_riders = len(riders)
-        num_no_helmet = sum(1 for r in riders if not r.get("has_helmet", True))
+        # ── Filter low-confidence rider detections ────────────────────────────
+        confident_riders = [
+            r for r in all_riders if r.get("score", 0.0) >= self.min_rider_score
+        ]
 
-        triple_riding = num_riders > self.triple_threshold
+        num_riders = len(confident_riders)
+
+        # ── Helmet violations: only count no-helmet detections above a higher
+        #    confidence threshold to suppress false positives ─────────────────
+        num_no_helmet = sum(
+            1 for r in confident_riders
+            if not r.get("has_helmet", True)
+            and r.get("score", 0.0) >= self.helmet_conf_threshold
+        )
+
+        triple_riding    = num_riders > self.triple_threshold
         helmet_violation = num_no_helmet > 0
-        has_violation = triple_riding or helmet_violation
 
+        # ── Early exit: no violation and no overriding flag ───────────────────
+        # Also skip if no riders detected at all — likely empty/parked bike
+        has_violation = triple_riding or helmet_violation
         if not has_violation and not self.run_ocr_on_all:
             return None
+        if num_riders == 0 and not self.run_ocr_on_all:
+            return None
 
-        # OCR
+        # ── OCR ───────────────────────────────────────────────────────────────
         plate_result = ocr_reader.read_plate(img, search_box=vehicle_box)
         plate_text = plate_result.get("text", "")
 

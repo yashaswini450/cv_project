@@ -4,11 +4,13 @@ License plate detection and OCR pipeline.
 
 Pipeline
 --------
-1. Detect the license plate region within the two-wheeler's bounding box
-   using a YOLO-based plate detector (or a simple contour heuristic as fallback).
-2. Crop and preprocess the plate image (CLAHE + sharpen + binarize).
-3. Run EasyOCR (default) or PaddleOCR to extract the plate text.
-4. Post-process the raw text to produce a clean plate string.
+1. If the custom helmet model has a 'plat nomor' class, run it on the full
+   vehicle crop to locate the plate (most accurate).
+2. Otherwise fall back to: YOLO plate detector → contour heuristic.
+3. If no plate is found in the bottom-half ROI, retry with the full vehicle crop.
+4. Crop and preprocess the plate image (CLAHE + sharpen + binarize).
+5. Run EasyOCR (default) or PaddleOCR to extract the plate text.
+6. Post-process the raw text with format-aware OCR error corrections.
 """
 
 from __future__ import annotations
@@ -40,6 +42,11 @@ class LicensePlateOCR:
         Minimum confidence for plate detections.
     device : str
         'cpu', 'cuda', or 'mps'.
+    helmet_model : optional YOLO model
+        If supplied and it has a 'plat nomor' class, that model is used for
+        plate detection within the vehicle crop (no separate plate model needed).
+    helmet_plate_ids : list[int]
+        Class IDs for the plate class in the helmet model.
     """
 
     def __init__(
@@ -49,11 +56,15 @@ class LicensePlateOCR:
         languages: Optional[List[str]] = None,
         conf_threshold: float = 0.30,
         device: str = "cpu",
+        helmet_model=None,           # optional: shared YOLO model that has plate class
+        helmet_plate_ids: Optional[List[int]] = None,
     ):
         self.conf = conf_threshold
         self.device = device
         self._use_yolo_plate = False
         self._ocr_backend = ocr_backend.lower()
+        self._helmet_model = helmet_model
+        self._helmet_plate_ids = helmet_plate_ids or []
 
         # ── 1. Plate detector ─────────────────────────────────────────────────
         if plate_model_path and Path(plate_model_path).exists():
@@ -102,9 +113,10 @@ class LicensePlateOCR:
         h, w = img.shape[:2]
 
         if search_box:
-            # Expand bottom half of vehicle box — plates are usually at the rear/bottom
             x1, y1, x2, y2 = search_box
-            mid_y = y1 + (y2 - y1) // 2
+            # Plate search region: bottom 60% of vehicle box
+            # (wider than before — was bottom 50%, which cut off some plates)
+            mid_y = y1 + int((y2 - y1) * 0.40)
             plate_search_region = (x1, mid_y, x2, y2)
             roi = crop_box(img, plate_search_region, pad=0.1)
             offset = (plate_search_region[0], plate_search_region[1])
@@ -112,22 +124,64 @@ class LicensePlateOCR:
             roi = img
             offset = (0, 0)
 
-        # ── Detect plate location ─────────────────────────────────────────────
-        plate_box_local, det_score = self._detect_plate(roi)
+        # ── Strategy 1: Use helmet model's plate class if available ──────────
+        if self._helmet_model is not None and self._helmet_plate_ids:
+            plate_box_local, det_score = self._yolo_detect_with_model(
+                self._helmet_model, roi, class_ids=self._helmet_plate_ids
+            )
+            if plate_box_local is not None:
+                return self._finalize_plate(
+                    img, roi, plate_box_local, det_score, offset, search_box
+                )
+
+        # ── Strategy 2: Dedicated plate YOLO model ───────────────────────────
+        if self._use_yolo_plate:
+            plate_box_local, det_score = self._yolo_detect_plate(roi)
+            if plate_box_local is not None:
+                return self._finalize_plate(
+                    img, roi, plate_box_local, det_score, offset, search_box
+                )
+
+        # ── Strategy 3: Heuristic contour detection in bottom ROI ────────────
+        plate_box_local, det_score = self._heuristic_detect_plate(roi)
+
+        # ── Strategy 4: If heuristic failed, retry on full vehicle crop ──────
+        if plate_box_local is None and search_box:
+            full_roi = crop_box(img, search_box, pad=0.05)
+            plate_box_local, det_score = self._heuristic_detect_plate(full_roi)
+            if plate_box_local is not None:
+                # Recalculate offset to full vehicle box
+                offset = (search_box[0], search_box[1])
+                roi = full_roi
 
         if plate_box_local is None:
             # Last resort: use entire ROI as plate region
             plate_box_local = (0, 0, roi.shape[1], roi.shape[0])
             det_score = 0.0
 
+        return self._finalize_plate(
+            img, roi, plate_box_local, det_score, offset, search_box
+        )
+
+    # --------------------------------------------------------------- internals
+
+    def _finalize_plate(
+        self,
+        img: np.ndarray,
+        roi: np.ndarray,
+        plate_box_local: Tuple[int, int, int, int],
+        det_score: float,
+        offset: Tuple[int, int],
+        search_box: Optional[Tuple[int, int, int, int]],
+    ) -> Dict[str, Any]:
+        """Crop, OCR, and package the plate result."""
         plate_crop = crop_box(roi, plate_box_local, pad=0.05)
 
-        # ── OCR ───────────────────────────────────────────────────────────────
         text, ocr_score = self._run_ocr(plate_crop)
         text = normalize_plate_text(text)
 
         # Convert local plate box → full image coordinates
-        if plate_box_local and search_box:
+        if search_box:
             px1, py1, px2, py2 = plate_box_local
             full_box = (
                 offset[0] + px1,
@@ -144,8 +198,6 @@ class LicensePlateOCR:
             "score": det_score * ocr_score if det_score > 0 else ocr_score,
         }
 
-    # --------------------------------------------------------------- internals
-
     def _detect_plate(
         self, roi: np.ndarray
     ) -> Tuple[Optional[Tuple[int, int, int, int]], float]:
@@ -157,9 +209,20 @@ class LicensePlateOCR:
     def _yolo_detect_plate(
         self, roi: np.ndarray
     ) -> Tuple[Optional[Tuple[int, int, int, int]], float]:
-        results = self._plate_model.predict(
-            source=roi, conf=self.conf, verbose=False
-        )
+        return self._yolo_detect_with_model(self._plate_model, roi)
+
+    @staticmethod
+    def _yolo_detect_with_model(
+        model,
+        roi: np.ndarray,
+        class_ids: Optional[List[int]] = None,
+        conf: float = 0.25,
+    ) -> Tuple[Optional[Tuple[int, int, int, int]], float]:
+        """Run any YOLO model on roi and return the highest-confidence detection."""
+        kwargs = dict(source=roi, conf=conf, verbose=False)
+        if class_ids:
+            kwargs["classes"] = class_ids
+        results = model.predict(**kwargs)
         best_score = 0.0
         best_box = None
         if results:
@@ -182,6 +245,9 @@ class LicensePlateOCR:
         Works reasonably well on clean, well-lit Indian plates.
         Returns (box, confidence=0.5) or (None, 0.0).
         """
+        if roi.size == 0:
+            return None, 0.0
+
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blur, 50, 150)
@@ -197,8 +263,8 @@ class LicensePlateOCR:
             x, y, bw, bh = cv2.boundingRect(cnt)
             aspect = bw / (bh + 1e-6)
             area_ratio = (bw * bh) / (w * h)
-            # Indian plate aspect ratio ≈ 2:1 to 5:1, area 1-15% of ROI
-            if 1.5 < aspect < 6.0 and 0.01 < area_ratio < 0.25:
+            # Indian plate aspect ratio ≈ 2:1 to 5:1, area 1-20% of ROI
+            if 1.5 < aspect < 6.0 and 0.005 < area_ratio < 0.25:
                 candidates.append((x, y, x + bw, y + bh, bw * bh))
 
         if not candidates:
@@ -210,16 +276,16 @@ class LicensePlateOCR:
 
     def _run_ocr(self, plate_img: np.ndarray) -> Tuple[str, float]:
         """Run OCR on a plate crop. Returns (raw_text, confidence)."""
-        # Preprocess
         if plate_img.size == 0:
             return "", 0.0
 
         # Resize to standard width for better OCR accuracy
         target_w = 300
         scale = target_w / (plate_img.shape[1] + 1e-6)
+        new_h = max(1, int(plate_img.shape[0] * scale))
         plate_resized = cv2.resize(
             plate_img,
-            (target_w, max(1, int(plate_img.shape[0] * scale))),
+            (target_w, new_h),
             interpolation=cv2.INTER_CUBIC,
         )
         enhanced = enhance_for_ocr(plate_resized)

@@ -47,53 +47,74 @@ class TrafficViolationDetector:
     ----------
     model_dir : str | Path
         Directory containing model weight files.
-        Expected layout (files are optional; defaults are used if absent):
+        Expected layout:
             model_dir/
-            ├── yolov8n.pt               ← COCO two-wheeler detector
-            ├── helmet_detector.pt       ← Rider + helmet detector (custom)
-            └── plate_detector.pt        ← License plate detector (custom)
+            ├── helmet_detector.pt   ← Custom model: motor + helm + kepala + plat nomor
+            └── plate_detector.pt    ← (optional) dedicated plate detector
 
     device : str
         PyTorch device string: 'cpu', 'cuda', 'mps'.
-        Defaults to 'cpu' for broadest compatibility.
     """
 
     def __init__(self, model_dir: str = "./models", device: str = "cpu"):
         model_dir = Path(model_dir)
 
         # ── Resolve model paths ───────────────────────────────────────────────
-        twowheeler_weights = self._resolve(model_dir, "yolov8n.pt")
-        helmet_weights     = self._resolve(model_dir, "helmet_detector.pt")
-        plate_weights      = self._resolve(model_dir, "plate_detector.pt")
+        helmet_weights = self._resolve(model_dir, "helmet_detector.pt")
+        plate_weights  = self._resolve(model_dir, "plate_detector.pt")
 
-        # ── Instantiate detectors (models loaded here) ────────────────────────
+        # COCO fallback (for two-wheeler detection when no custom model)
+        coco_weights   = self._resolve(model_dir, "yolov8n.pt") or "yolov8n.pt"
+
+        # ── Two-Wheeler Detector ──────────────────────────────────────────────
+        # Use the custom model if available — it has a 'motor' class that is
+        # fine-tuned for this dataset and gives more reliable detections.
+        # Fall back to COCO yolov8n only if no custom model exists.
         self._twowheeler_detector = TwoWheelerDetector(
-            model_path=twowheeler_weights,
-            conf_threshold=0.35,
+            model_path=helmet_weights or coco_weights,
+            conf_threshold=0.30,
             iou_threshold=0.45,
             include_bicycle=False,
             device=device,
         )
 
+        # ── Rider + Helmet Detector ───────────────────────────────────────────
+        # Runs helm/kepala detection on the FULL image (once per predict call),
+        # then associates heads with vehicles by spatial overlap.
         self._rider_helmet_detector = RiderHelmetDetector(
             model_path=helmet_weights,
-            person_model_path=twowheeler_weights,  # reuse COCO model as fallback
-            conf_threshold=0.30,
+            person_model_path=coco_weights,
+            conf_threshold=0.25,    # Lower threshold to catch marginal head detections
             iou_threshold=0.45,
-            vehicle_overlap_thresh=0.25,
+            vehicle_overlap_thresh=0.10,  # Relaxed — heads can be partially above the bike
             device=device,
+        )
+
+        # ── OCR ───────────────────────────────────────────────────────────────
+        # Share the helmet model's plate class IDs for zero-extra-cost plate detection
+        _helmet_yolo = (
+            self._rider_helmet_detector._helmet_model
+            if self._rider_helmet_detector._use_dedicated else None
+        )
+        _plate_ids = (
+            self._rider_helmet_detector._plate_ids
+            if self._rider_helmet_detector._use_dedicated else []
         )
 
         self._ocr = LicensePlateOCR(
             plate_model_path=plate_weights,
             ocr_backend="easyocr",
             languages=["en"],
-            conf_threshold=0.30,
+            conf_threshold=0.25,
             device=device,
+            helmet_model=_helmet_yolo,
+            helmet_plate_ids=_plate_ids,
         )
 
         self._violation_engine = ViolationEngine(
             triple_riding_threshold=2,
+            min_rider_score=0.25,
+            helmet_conf_threshold=0.30,
             run_ocr_on_all=False,
         )
 
@@ -102,11 +123,6 @@ class TrafficViolationDetector:
     def predict(self, image_path: str) -> Dict[str, Any]:
         """
         Run the full violation detection pipeline on a single image.
-
-        Parameters
-        ----------
-        image_path : str
-            Absolute or relative path to the input RGB image.
 
         Returns
         -------
@@ -136,20 +152,25 @@ class TrafficViolationDetector:
         if not vehicles:
             return {"violations": []}
 
-        # ── Step 2: Rider + Helmet detection per vehicle ──────────────────────
+        # ── Step 2: Run full-frame head detection ONCE (for all vehicles) ─────
+        # This is the key efficiency + accuracy improvement: the model runs
+        # once on the whole image, not once per vehicle crop.
+        self._rider_helmet_detector.detect_all_heads(img)
+
+        # ── Step 3: Associate heads with vehicles ─────────────────────────────
         enriched_vehicles = []
         for vehicle in vehicles:
             riders = self._rider_helmet_detector.detect(img, vehicle["box"])
             enriched_vehicles.append({**vehicle, "riders": riders})
 
-        # ── Step 3: Violation classification + OCR ────────────────────────────
+        # ── Step 4: Violation classification + OCR ────────────────────────────
         violations = self._violation_engine.analyze(
             vehicles=enriched_vehicles,
             img=img,
             ocr_reader=self._ocr,
         )
 
-        # ── Step 4: Format output ─────────────────────────────────────────────
+        # ── Step 5: Format output ─────────────────────────────────────────────
         return ViolationEngine.format_output(violations)
 
     # --------------------------------------------------------------- internals

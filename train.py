@@ -36,12 +36,12 @@ from pathlib import Path
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULTS = {
-    "model":      "yolov8n.pt",   # start from COCO pretrained
-    "epochs":     50,
-    "imgsz":      640,
+    "model":      "yolov8s.pt",   # Small model: better accuracy than nano, still <25 MB
+    "epochs":     100,
+    "imgsz":      736,            # Slightly larger for better small-object detection
     "batch":      16,
     "lr0":        0.01,
-    "patience":   15,             # early stopping
+    "patience":   20,             # More patience for cosine schedule
     "workers":    4,
     "device":     "cpu",          # override to 'cuda' or 'mps' if available
     "project":    "runs/train",
@@ -92,6 +92,9 @@ def train(args):
         project=args.project,
         name=args.name,
         exist_ok=True,
+        # Learning rate schedule
+        cos_lr=True,              # Cosine annealing for smoother convergence
+        lrf=0.01,                 # Final LR = lr0 * lrf
         # Augmentation
         mosaic=1.0,
         flipud=0.0,
@@ -102,9 +105,13 @@ def train(args):
         degrees=5.0,
         translate=0.1,
         scale=0.5,
+        copy_paste=0.1,           # Copy-paste augmentation for small objects
+        mixup=0.1,                # Mixup for better generalization
+        close_mosaic=15,          # Disable mosaic in last 15 epochs for fine-tuning
         # Regularization
         weight_decay=0.0005,
         warmup_epochs=3,
+        dropout=0.0,
         # Logging
         verbose=True,
         plots=True,

@@ -6,7 +6,7 @@ Shared utility functions for image loading, drawing, and preprocessing.
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Union, List, Tuple, Optional
+from typing import Union, List, Tuple, Optional, Dict, Any
 
 
 # ─── Image I/O ───────────────────────────────────────────────────────────────
@@ -100,11 +100,33 @@ def normalize_plate_text(text: str) -> str:
     Post-process raw OCR output for license plates:
     - Uppercase
     - Remove spaces and special characters (keep alphanumeric only)
-    - Common substitutions: 0↔O in letter positions, 1↔I in letter positions
+    - Common OCR substitutions for Indian plates:
+        In letter positions (1st 2, 5th+): 0→O, 1→I, 5→S, 8→B
+        In digit positions (3rd-4th, later): O→0, I→1, S→5, B→8
     """
     text = text.upper().strip()
-    # Keep only alphanumeric
+    # Keep only alphanumeric characters
     text = "".join(c for c in text if c.isalnum())
+
+    if len(text) >= 4:
+        # Indian plate format: XX 00 XX 0000 (e.g., MH12AB1234)
+        # Positions 0-1: state code (letters)
+        # Positions 2-3: district code (digits)
+        # Positions 4-5: series (letters)
+        # Positions 6+: number (digits)
+        chars = list(text)
+        digit_subs = {"O": "0", "I": "1", "S": "5", "B": "8", "Z": "2", "G": "6"}
+        letter_subs = {"0": "O", "1": "I", "5": "S", "8": "B"}
+
+        for i, c in enumerate(chars):
+            if i < 2 or (4 <= i < 6):  # letter positions
+                if c in digit_subs:
+                    chars[i] = digit_subs[c]
+            elif 2 <= i < 4 or i >= 6:  # digit positions
+                if c in letter_subs:
+                    chars[i] = letter_subs[c]
+        text = "".join(chars)
+
     return text
 
 
@@ -145,6 +167,42 @@ def box_overlap_ratio(inner: Tuple[int, int, int, int],
     inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
     inner_area = (xi2 - xi1) * (yi2 - yi1) + 1e-6
     return inter_area / inner_area
+
+
+def nms_boxes(
+    detections: List[Dict[str, Any]],
+    iou_threshold: float = 0.45,
+) -> List[Dict[str, Any]]:
+    """
+    Apply Non-Maximum Suppression to a list of detection dicts.
+
+    Each detection dict must have:
+        'box'   : (x1, y1, x2, y2)
+        'score' : float
+
+    Returns a filtered list sorted by descending score.
+    """
+    if not detections:
+        return []
+
+    detections = sorted(detections, key=lambda d: d["score"], reverse=True)
+    kept: List[Dict[str, Any]] = []
+
+    while detections:
+        best = detections.pop(0)
+        kept.append(best)
+        detections = [
+            d for d in detections
+            if iou(best["box"], d["box"]) < iou_threshold
+        ]
+
+    return kept
+
+
+def box_area(box: Tuple[int, int, int, int]) -> int:
+    """Return the pixel area of a bounding box (x1, y1, x2, y2)."""
+    x1, y1, x2, y2 = box
+    return max(0, x2 - x1) * max(0, y2 - y1)
 
 
 # ─── Visualization ───────────────────────────────────────────────────────────
