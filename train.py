@@ -17,10 +17,10 @@ Training strategy:
 
 Usage:
     # Basic training (YOLOv8 nano, 50 epochs)
-    python train.py --data data/roboflow/data.yaml
+    python train.py --data data/unified_dataset/unified_data.yaml
 
     # Larger model, more epochs
-    python train.py --data data/roboflow/data.yaml --model yolov8m --epochs 100
+    python train.py --data data/unified_dataset/unified_data.yaml --model yolov8m --epochs 100
 
     # Resume interrupted training
     python train.py --resume runs/train/exp/weights/last.pt
