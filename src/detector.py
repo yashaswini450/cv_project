@@ -88,7 +88,7 @@ class TwoWheelerDetector:
             names: Dict[int, str] = self.model.names
             custom_motor_ids = [
                 i for i, n in names.items()
-                if n.lower() in {"motor", "motorcycle", "bike", "scooter"}
+                if n.lower() in {"motor", "motorcycle", "bike", "scooter", "triple_riding", "tripleriding"}
             ]
             if custom_motor_ids:
                 self._target_classes = custom_motor_ids
@@ -144,7 +144,7 @@ class TwoWheelerDetector:
                     {
                         "box": (x1, y1, x2, y2),
                         "score": score,
-                        "label": _COCO_TWO_WHEELER_CLASSES.get(cls_id, "two_wheeler"),
+                        "label": self.model.names.get(cls_id, "two_wheeler"),
                     }
                 )
         return detections

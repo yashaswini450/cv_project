@@ -18,38 +18,30 @@ DATA_DIR = Path("./data")
 UNIFIED_DIR = DATA_DIR / "unified_dataset"
 
 # Canonical unified classes
-CANONICAL_CLASSES = ["helm", "kepala", "motor", "plat nomor", "rider"]
+CANONICAL_CLASSES = ["helm", "kepala", "motor", "plat nomor", "rider", "triple_riding"]
 CANONICAL_MAP = {c: i for i, c in enumerate(CANONICAL_CLASSES)}
 
 # Mappings from potential dataset class names to canonical names
 CLASS_ALIASES = {
     "helmet": "helm",
-    "with_helmet": "helm",
-    "with helmet": "helm",
-    "helm": "helm",
+    "withhelmet": "helm",
     
     "no_helmet": "kepala",
-    "without_helmet": "kepala",
-    "without helmet": "kepala",
-    "no helmet": "kepala",
+    "withouthelmet": "kepala",
     "kepala": "kepala",
     
     "motorcycle": "motor",
     "motor": "motor",
-    "bike": "motor",
-    "scooter": "motor",
-    "two wheeler": "motor",
-    "twowheeler": "motor",
     
     "license_plate": "plat nomor",
     "plate": "plat nomor",
-    "numberplate": "plat nomor",
     "plat nomor": "plat nomor",
     
     "rider": "rider",
     "person": "rider",
-    "motorcyclist": "rider",
-    "bb": "rider"
+    "bb": "rider",
+    
+    "tripleriding": "triple_riding"
 }
 
 def ask(prompt: str, env_var: str, secret: bool = False) -> str:
@@ -77,7 +69,18 @@ def download_roboflow_dataset(api_key: str, workspace: str, project_name: str, d
         from roboflow import Roboflow
 
     rf = Roboflow(api_key=api_key)
-    project = rf.workspace(workspace).project(project_name)
+    try:
+        project = rf.workspace(workspace).project(project_name)
+    except Exception as e:
+        print(f"\\n  [Roboflow Error] Could not access {workspace}/{project_name} automatically.")
+        print(f"  This usually happens because the dataset requires you to be logged into your specific account on the browser.")
+        print(f"  \\n  👉 PLEASE DOWNLOAD MANUALLY:")
+        print(f"  1. Go to https://universe.roboflow.com/{workspace}/{project_name}")
+        print(f"  2. Click 'Download Dataset'")
+        print(f"  3. Select 'YOLOv8' format and download the .zip file.")
+        print(f"  4. Unzip the contents into: {out_dir.absolute()}")
+        print(f"  5. Run this script again!\\n")
+        return None
     
     # Try versions sequentially
     version_to_dl = None
@@ -119,7 +122,7 @@ def download_kaggle_dataset(username: str, key: str, dataset_path: str, dest_nam
     print(f"  [Kaggle] Downloading {dataset_path}...")
     out_dir.mkdir(parents=True, exist_ok=True)
     subprocess.check_call([
-        sys.executable, "-m", "kaggle", "datasets", "download",
+        "kaggle", "datasets", "download",
         "-d", dataset_path,
         "-p", str(out_dir),
         "--unzip",
@@ -231,51 +234,30 @@ def main():
     print("🚦 Unified Dataset Merger")
     
     # 1. Get Credentials
-    rf_api_key = ask("Roboflow API Key", "ROBOFLOW_API_KEY", secret=True)
     k_user = ask("Kaggle Username", "KAGGLE_USERNAME")
     k_key = ask("Kaggle API Key", "KAGGLE_KEY", secret=True)
 
     # 2. Download Datasets
-    print("\n--- Downloading Datasets ---")
+    print("\\n--- Downloading Datasets ---")
     
     # Existing Roboflow dataset
     ds_base = DATA_DIR / "roboflow"
     
-    # Dataset 3: Triple Riding
-    ds3 = None
-    if rf_api_key:
-        ds3 = download_roboflow_dataset(rf_api_key, "project-ksfzr", "triple-riding", "roboflow_triple_riding")
-    
-    # Dataset 4: License Plate
-    ds4 = None
-    if rf_api_key:
-        # Download to a temporary/staging location to check size first
-        temp_ds4 = download_roboflow_dataset(rf_api_key, "objectdetection-slsst", "license-plate-detection-naxbh", "roboflow_license_plate")
-        if temp_ds4:
-            # Count images
-            num_imgs = len(list(temp_ds4.rglob("*.jpg"))) + len(list(temp_ds4.rglob("*.png")))
-            if num_imgs <= 2500:
-                print(f"  [Dataset 4] Contains {num_imgs} images. Including it.")
-                ds4 = temp_ds4
-            else:
-                print(f"  [Dataset 4] Contains {num_imgs} images (exceeds 2500 limit). Removing to save training time.")
-                shutil.rmtree(temp_ds4)
-    
-    # Dataset 5: Kaggle Indian Traffic
+    # Dataset 5: Kaggle
     ds5 = None
     if k_user and k_key:
-        ds5 = download_kaggle_dataset(k_user, k_key, "sakshamjn/vehicle-detection-8-classes-object-detection", "kaggle_indian_traffic")
+        ds5 = download_kaggle_dataset(k_user, k_key, "devgurucodes/trafffic-violations-triple-riding-no-helmet-plate", "kaggle_new_traffic")
 
     # 3. Process and Merge
-    print("\n--- Merging Datasets ---")
+    print("\\n--- Merging Datasets ---")
     if UNIFIED_DIR.exists():
         shutil.rmtree(UNIFIED_DIR)
     UNIFIED_DIR.mkdir(parents=True)
 
-    datasets_to_merge = [ds for ds in [ds_base, ds3, ds4, ds5] if ds is not None and ds.exists()]
+    datasets_to_merge = [ds for ds in [ds_base, ds5] if ds is not None and ds.exists()]
     
     for split in ["train", "val", "test"]:
-        print(f"\nProcessing split: {split}")
+        print(f"\\nProcessing split: {split}")
         for ds in datasets_to_merge:
             process_and_merge_dataset(ds, split)
 
@@ -291,7 +273,7 @@ def main():
     with open(UNIFIED_DIR / "unified_data.yaml", "w") as f:
         yaml.dump(yaml_content, f, sort_keys=False)
         
-    print(f"\n✅ Merging complete. Unified data.yaml saved at {UNIFIED_DIR / 'unified_data.yaml'}")
+    print(f"\\n✅ Merging complete. Unified data.yaml saved at {UNIFIED_DIR / 'unified_data.yaml'}")
     print("Update your train.py to point to data/unified_dataset/unified_data.yaml")
 
 if __name__ == "__main__":

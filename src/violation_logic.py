@@ -130,15 +130,19 @@ class ViolationEngine:
             and r.get("score", 0.0) >= self.helmet_conf_threshold
         )
 
+        # ── Handle explicit triple riding class ───────────────────────────────
+        is_explicit_triple = (vehicle.get("label", "").lower() in {"triple_riding", "tripleriding"})
+        if is_explicit_triple:
+            num_riders = max(3, num_riders)
+
         triple_riding    = num_riders > self.triple_threshold
         helmet_violation = num_no_helmet > 0
 
         # ── Early exit: no violation and no overriding flag ───────────────────
-        # Also skip if no riders detected at all — likely empty/parked bike
         has_violation = triple_riding or helmet_violation
         if not has_violation and not self.run_ocr_on_all:
             return None
-        if num_riders == 0 and not self.run_ocr_on_all:
+        if num_riders == 0 and not is_explicit_triple and not self.run_ocr_on_all:
             return None
 
         # ── OCR ───────────────────────────────────────────────────────────────
