@@ -131,7 +131,9 @@ class ViolationEngine:
         )
 
         # ── Handle explicit triple riding class ───────────────────────────────
-        is_explicit_triple = (vehicle.get("label", "").lower() in {"triple_riding", "tripleriding"})
+        # Disabled: The devgurucodes dataset's "TripleRiding" class is noisy and
+        # flags normal motorcycles. Rely purely on counting detected heads.
+        is_explicit_triple = False
         if is_explicit_triple:
             num_riders = max(3, num_riders)
 

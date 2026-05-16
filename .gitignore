@@ -36,3 +36,5 @@ Thumbs.db
 # Test data (optional — add your own samples manually)
 data/
 *.zip
+runs/
+unified_dataset/

@@ -107,6 +107,7 @@ class TrafficViolationDetector:
             languages=["en"],
             conf_threshold=0.25,
             device=device,
+            model_dir=model_dir,
             helmet_model=_helmet_yolo,
             helmet_plate_ids=_plate_ids,
         )

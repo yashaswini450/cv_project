@@ -56,6 +56,7 @@ class LicensePlateOCR:
         languages: Optional[List[str]] = None,
         conf_threshold: float = 0.30,
         device: str = "cpu",
+        model_dir: Optional[str | Path] = None,      # Added to locate offline OCR weights
         helmet_model=None,           # optional: shared YOLO model that has plate class
         helmet_plate_ids: Optional[List[int]] = None,
     ):
@@ -78,7 +79,16 @@ class LicensePlateOCR:
         if self._ocr_backend == "easyocr":
             import easyocr
             use_gpu = device.startswith("cuda")
-            self._reader = easyocr.Reader(langs, gpu=use_gpu, verbose=False)
+            
+            # ── Strictly Offline Execution (Requirement) ──
+            ocr_model_dir = str(Path(model_dir) / "easyocr") if model_dir else None
+            self._reader = easyocr.Reader(
+                langs, 
+                gpu=use_gpu, 
+                verbose=False,
+                model_storage_directory=ocr_model_dir,
+                download_enabled=False
+            )
         elif self._ocr_backend == "paddle":
             from paddleocr import PaddleOCR
             self._reader = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
