@@ -307,14 +307,29 @@ class LicensePlateOCR:
         return "", 0.0
 
     def _easyocr_read(self, img: np.ndarray) -> Tuple[str, float]:
-        """Run EasyOCR on a grayscale/binary image."""
+        """Run EasyOCR on a grayscale/binary image with Indian plate format filtering."""
         try:
             results = self._reader.readtext(img, detail=1, paragraph=False)
             if not results:
                 return "", 0.0
-            # Concatenate all detected text fragments
+
             texts = [r[1] for r in results]
             scores = [r[2] for r in results]
+
+            # Clean individual fragments
+            clean_texts = [re.sub(r"[^A-Z0-9]", "", t.upper()) for t in texts]
+
+            # Search sliding windows of consecutive text blocks for an Indian plate match
+            # (XX00XX0000, XX000000, etc.)
+            for window in range(1, len(clean_texts) + 1):
+                for i in range(len(clean_texts) - window + 1):
+                    sub = "".join(clean_texts[i : i + window])
+                    # Indian plate check: >= 8 chars, starts with 2 letters and 2 digits, ends with digits
+                    if len(sub) >= 8 and sub[:2].isalpha() and sub[2:4].isdigit() and sub[-2:].isdigit():
+                        sub_scores = scores[i : i + window]
+                        return sub, float(np.mean(sub_scores))
+
+            # Fallback: concatenate all
             combined = " ".join(texts)
             avg_score = float(np.mean(scores))
             return combined, avg_score

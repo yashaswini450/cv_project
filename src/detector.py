@@ -121,6 +121,7 @@ class TwoWheelerDetector:
             conf=self.conf,
             iou=self.iou,
             classes=self._target_classes,
+            augment=True,        # ── TTA enabled for robust detection ──
             verbose=False,
         )
 
@@ -257,6 +258,7 @@ class RiderHelmetDetector:
             conf=self.conf,
             iou=self.iou,
             classes=None,
+            augment=True,        # ── TTA enabled for robust head detection ──
             verbose=False,
         )
 
@@ -411,6 +413,7 @@ class RiderHelmetDetector:
             conf=self.conf,
             iou=self.iou,
             classes=[_COCO_PERSON_CLASS],
+            augment=True,
             verbose=False,
         )
 

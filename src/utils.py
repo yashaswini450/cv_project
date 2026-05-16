@@ -82,8 +82,8 @@ def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
 
-    # 1. CLAHE contrast enhancement
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # 1. CLAHE contrast enhancement (tuned for harsh Indian sunlight/shadows)
+    clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
     gray = clahe.apply(gray)
 
     # 2. Sharpen
