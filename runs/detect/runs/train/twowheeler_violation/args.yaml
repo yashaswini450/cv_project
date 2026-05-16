@@ -1,8 +1,8 @@
 task: detect
 mode: train
 model: yolov8s.pt
-data: data/roboflow/data.yaml
-epochs: 100
+data: data/unified_dataset/unified_data.yaml
+epochs: 40
 time: null
 patience: 20
 batch: 16
