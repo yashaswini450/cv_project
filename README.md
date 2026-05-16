@@ -49,8 +49,7 @@ cv_project/
 │
 ├── src/                             # Core source modules
 │   ├── __init__.py
-│   ├── detector.py                  # Two-wheeler & rider detection
-│   ├── helmet_classifier.py         # Helmet presence classification
+│   ├── detector.py                  # Two-wheeler, rider & helmet detection
 │   ├── ocr.py                       # License plate detection + OCR
 │   ├── violation_logic.py           # Violation rules engine
 │   └── utils.py                     # Helper functions
@@ -94,13 +93,12 @@ cv_project/
 **Goal:** For each detected two-wheeler, count riders and identify helmet violations.
 
 **Approach:**
-- Use a second **YOLOv8** model trained on rider/helmet detection
-  - Option A: Use a public pretrained model (e.g., from Roboflow helmet detection dataset)
-  - Option B: Use YOLOv8 person detection + crop + helmet classifier
-- Count persons within/above the two-wheeler bounding box
-- Classify each rider's head region for helmet presence
+- Use a **YOLOv8** model trained for full-frame rider and helmet detection.
+- Detect `rider` and `helmet` classes across the entire image.
+- Use spatial association (IoU-based overlap) to map each rider to their corresponding two-wheeler bounding box.
+- Classify helmet compliance based on the detected `helmet` bounding boxes overlapping with `rider` bounding boxes.
 
-**Key files:** `src/detector.py`, `src/helmet_classifier.py`
+**Key files:** `src/detector.py`
 
 ---
 
@@ -165,7 +163,8 @@ class TrafficViolationDetector:
 ### ✅ Step 7 — Local Testing & Evaluation
 **Goal:** Validate the pipeline against test images.
 
-- Write `test_solution.py` to run `predict()` on sample images
+- Write `test_solution.py` to run `predict()` on sample images.
+- Write `evaluate_kaggle.py` to rigorously test the model on the Kaggle dataset.
 - Test edge cases:
   - No two-wheelers in frame
   - Occluded riders
@@ -173,7 +172,7 @@ class TrafficViolationDetector:
   - Low-light conditions
   - Multiple vehicles in one image
 
-**Key files:** `test_solution.py`
+**Key files:** `test_solution.py`, `evaluate_kaggle.py`
 
 ---
 
@@ -194,6 +193,7 @@ class TrafficViolationDetector:
 - Add error handling for edge cases (no detections, bad image, corrupt plate)
 - Add confidence thresholds tuning
 - Final review of output JSON format compliance
+- Implement full-frame detection and spatial association to handle occluded and overlapping riders correctly
 
 ---
 
@@ -323,4 +323,4 @@ Score = w1 × Violation_Accuracy + w2 × OCR_Accuracy
 | Step 6 — Integration (solution.py) | ✅ Complete |
 | Step 7 — Testing | ✅ Complete |
 | Step 8 — Download Script | ✅ Complete |
-| Step 9 — Optimization | 🔄 In Progress |
+| Step 9 — Optimization | ✅ Complete |
