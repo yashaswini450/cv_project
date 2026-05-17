@@ -33,7 +33,7 @@ import cv2
 from src.detector import TwoWheelerDetector, RiderHelmetDetector
 from src.ocr import LicensePlateOCR
 from src.violation_logic import ViolationEngine
-from src.utils import load_image
+from src.utils import load_image, expand_box, box_overlap_ratio, nms_boxes
 
 
 class TrafficViolationDetector:
@@ -72,7 +72,7 @@ class TrafficViolationDetector:
         # Fall back to COCO yolov8n only if no custom model exists.
         self._twowheeler_detector = TwoWheelerDetector(
             model_path=helmet_weights or coco_weights,
-            conf_threshold=0.30,
+            conf_threshold=0.18,    # Lower threshold to catch marginal vehicle detections
             iou_threshold=0.45,
             include_bicycle=False,
             device=device,
@@ -84,7 +84,7 @@ class TrafficViolationDetector:
         self._rider_helmet_detector = RiderHelmetDetector(
             model_path=helmet_weights,
             person_model_path=coco_weights,
-            conf_threshold=0.25,    # Lower threshold to catch marginal head detections
+            conf_threshold=0.25,    # Optimal threshold to prevent false positive head detections
             iou_threshold=0.45,
             vehicle_overlap_thresh=0.10,  # Relaxed — heads can be partially above the bike
             device=device,
@@ -112,10 +112,19 @@ class TrafficViolationDetector:
             helmet_plate_ids=_plate_ids,
         )
 
+        # ── COCO Person Detector (supplementary for triple-riding count) ────
+        # The custom helmet model only detects heads (helm/kepala), and often
+        # misses the 3rd rider. A COCO person detector gives a secondary
+        # rider count that we use when head count <= 2.
+        from ultralytics import YOLO
+        self._person_model = YOLO(str(coco_weights))
+        self._person_model.to(device)
+        self._device = device
+
         self._violation_engine = ViolationEngine(
             triple_riding_threshold=2,
-            min_rider_score=0.25,
-            helmet_conf_threshold=0.30,
+            min_rider_score=0.20,
+            helmet_conf_threshold=0.25,
             run_ocr_on_all=False,
         )
 
@@ -153,15 +162,72 @@ class TrafficViolationDetector:
         if not vehicles:
             return {"violations": []}
 
+        # ── Step 1b: Suppress nested/redundant vehicle detections ─────────────
+        vehicles = sorted(vehicles, key=lambda v: v["score"], reverse=True)
+        kept_vehicles = []
+        for v in vehicles:
+            is_nested = False
+            for k in kept_vehicles:
+                # If 70% or more of v's box is inside k's box, suppress v
+                if box_overlap_ratio(v["box"], k["box"]) >= 0.70:
+                    is_nested = True
+                    break
+            if not is_nested:
+                kept_vehicles.append(v)
+        vehicles = kept_vehicles
+
         # ── Step 2: Run full-frame head detection ONCE (for all vehicles) ─────
-        # This is the key efficiency + accuracy improvement: the model runs
-        # once on the whole image, not once per vehicle crop.
-        self._rider_helmet_detector.detect_all_heads(img)
+        all_heads = self._rider_helmet_detector.detect_all_heads(img)
+
+        # ── Step 2b: Run COCO person detection ONCE on full frame ─────────────
+        h, w = img.shape[:2]
+        person_results = self._person_model.predict(
+            source=img, conf=0.30, iou=0.45, classes=[0],  # class 0 = person
+            verbose=False, imgsz=1024,
+        )
+        all_persons = []
+        if person_results:
+            for res in person_results:
+                if res.boxes is None:
+                    continue
+                for box_data in res.boxes:
+                    score = float(box_data.conf[0].item())
+                    bx = tuple(int(v) for v in box_data.xyxy[0].tolist())
+                    all_persons.append({"box": bx, "score": score})
 
         # ── Step 3: Associate heads with vehicles ─────────────────────────────
         enriched_vehicles = []
         for vehicle in vehicles:
             riders = self._rider_helmet_detector.detect(img, vehicle["box"])
+
+            # ── Supplement with COCO person count for overloading ─────────
+            # If we detected <=2 heads, check if COCO sees more persons
+            # overlapping this vehicle. This catches the 3rd rider that the
+            # head detector misses.
+            if len(riders) <= 2:
+                vx1, vy1, vx2, vy2 = vehicle["box"]
+                vw, vh = vx2 - vx1, vy2 - vy1
+                # Upward-biased, tighter search box for riders sitting on the bike
+                search_box = (
+                    max(0, int(vx1 - 0.05 * vw)),
+                    max(0, int(vy1 - 0.45 * vh)),
+                    min(w, int(vx2 + 0.05 * vw)),
+                    min(h, int(vy2 + 0.05 * vh))
+                )
+                person_count = sum(
+                    1 for p in all_persons
+                    if box_overlap_ratio(p["box"], search_box) >= 0.40
+                )
+                if person_count >= 3 and person_count > len(riders):
+                    # COCO confirms 3+ persons near this bike.
+                    # Add synthetic riders to match COCO count.
+                    for _ in range(person_count - len(riders)):
+                        riders.append({
+                            "box": vehicle["box"],  # placeholder
+                            "has_helmet": True,     # unknown — assume helmeted
+                            "score": 0.30,          # synthetic
+                        })
+
             enriched_vehicles.append({**vehicle, "riders": riders})
 
         # ── Step 4: Violation classification + OCR ────────────────────────────

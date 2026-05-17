@@ -123,6 +123,7 @@ class TwoWheelerDetector:
             classes=self._target_classes,
             augment=True,        # ── TTA enabled for robust detection ──
             verbose=False,
+            imgsz=1024,          # Crucial: match training resolution
         )
 
         detections: List[Dict[str, Any]] = []
@@ -260,6 +261,7 @@ class RiderHelmetDetector:
             classes=None,
             augment=True,        # ── TTA enabled for robust head detection ──
             verbose=False,
+            imgsz=1024,          # Crucial: match training resolution
         )
 
         if results:
@@ -380,8 +382,10 @@ class RiderHelmetDetector:
         h, w = img.shape[:2]
 
         # Expand vehicle box for spatial association
-        # Heads are typically above/around the bike frame
-        search_box = expand_box(vehicle_box, 1.4, 2.0, w, h)
+        # Heads are typically above/around the bike frame.
+        # Increased factor_x from 1.4 to 1.6 to better catch 3rd riders leaning back.
+        # To revert, change 1.6 back to 1.4.
+        search_box = expand_box(vehicle_box, 1.6, 2.0, w, h)
 
         # Use the already-computed full-frame detections (set by detect_all_heads)
         # Do NOT call detect_all_heads() here — that would re-run the model and
@@ -394,8 +398,11 @@ class RiderHelmetDetector:
             if box_overlap_ratio(head["box"], search_box) >= self.overlap_thresh
         ]
 
-        # NMS within this vehicle's riders to remove duplicates
-        riders = nms_boxes(riders, iou_threshold=self.iou)
+        # NMS within this vehicle's riders to remove duplicates.
+        # We use a higher IoU threshold (0.65) here than self.iou (0.45) because 
+        # in triple riding, riders sit very close to each other and their heads
+        # often overlap significantly in the 2D projection.
+        riders = nms_boxes(riders, iou_threshold=0.65)
 
         return riders
 

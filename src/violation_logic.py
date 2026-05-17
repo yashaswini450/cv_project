@@ -49,8 +49,10 @@ class ViolationEngine:
     def __init__(
         self,
         triple_riding_threshold: int = 2,
-        min_rider_score: float = 0.35,
-        helmet_conf_threshold: float = 0.40,
+        # Lowered min_rider_score from 0.35 to 0.25 to catch occluded 3rd riders.
+        # To revert, change back to 0.35.
+        min_rider_score: float = 0.25,
+        helmet_conf_threshold: float = 0.25,
         run_ocr_on_all: bool = False,
     ):
         self.triple_threshold = triple_riding_threshold
