@@ -288,13 +288,7 @@ class RiderHelmetDetector:
                             "has_helmet": False,
                             "score": score,
                         })
-                    elif cls_id in self._rider_ids:
-                        self._cached_head_detections.append({
-                            "box": (x1, y1, x2, y2),
-                            "has_helmet": False,
-                            "score": score,
-                        })
-                    # Skip motor/plate classes
+                    # Skip motor/plate/rider classes
 
         # Resolve helm vs kepala conflicts (same head detected as both classes)
         self._cached_head_detections = self._resolve_helm_kepala_conflicts(
