@@ -120,11 +120,11 @@ def normalize_plate_text(text: str) -> str:
 
         for i, c in enumerate(chars):
             if i < 2 or (4 <= i < 6):  # letter positions
-                if c in digit_subs:
-                    chars[i] = digit_subs[c]
-            elif 2 <= i < 4 or i >= 6:  # digit positions
                 if c in letter_subs:
                     chars[i] = letter_subs[c]
+            elif 2 <= i < 4 or i >= 6:  # digit positions
+                if c in digit_subs:
+                    chars[i] = digit_subs[c]
         text = "".join(chars)
 
     return text
