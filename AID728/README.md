@@ -276,13 +276,13 @@ python test_solution.py --image data/sample_images/test1.jpg
 
 We have performed a rigorous local evaluation on the **Kaggle Traffic Violation Test Dataset** (300 test images evenly split across violation categories). 
 
-Our optimized **Hybrid YOLOv8m (Custom Head Detector) + YOLOv8n (COCO Person Detector)** pipeline achieves a final overall accuracy of **86.67%**!
+Our optimized **Hybrid YOLOv8s (Custom Head Detector) + YOLOv8s (COCO Person Detector)** pipeline achieves a final overall accuracy of **85.00%**!
 
 ### Detailed Category Performance:
-- **HELMET (Zero Violations):** **95.00%** Accuracy (5 FP, 0 FN)
-- **NO_HELMET (Helmet Violation):** **83.00%** Accuracy (0 FP, 17 FN)
-- **OVERLOADING (Triple Riding):** **82.00%** Accuracy (0 FP, 18 FN)
-- **OVERALL ACCURACY:** **86.67%** (260/300 correct classifications)
+- **HELMET (Zero Violations):** **88.00%** Accuracy (12 FP, 0 FN)
+- **NO_HELMET (Helmet Violation):** **78.00%** Accuracy (0 FP, 22 FN)
+- **OVERLOADING (Triple Riding):** **89.00%** Accuracy (0 FP, 11 FN)
+- **OVERALL ACCURACY:** **85.00%** (255/300 correct classifications)
 
 ### Key Optimization Architecture:
 1. **Upward-Biased COCO Search Box:** To catch triple-riding when spatial crowding or NMS suppression misses the third head, we run a full-frame COCO person detector as a fallback. We filter detections using an upward-biased search box (expanding 45% upward and 5% downward, with minimal 5% horizontal padding) and a high overlap ratio threshold ($\ge 0.40$). This completely eliminates background pedestrian false positives while capturing true riders sitting on the vehicle.
@@ -300,7 +300,7 @@ Our optimized **Hybrid YOLOv8m (Custom Head Detector) + YOLOv8n (COCO Person Det
 | Low-light images | CLAHE / brightness normalization |
 | Overlapping bounding boxes | NMS post-processing |
 | Indian plate font variance | PaddleOCR fine-tuned on Indian plates |
-| Model size constraint | Use YOLOv8n (nano) variants + quantization |
+| Model size constraint | Use YOLOv8s (small) variants |
 
 ---
 
@@ -308,12 +308,12 @@ Our optimized **Hybrid YOLOv8m (Custom Head Detector) + YOLOv8n (COCO Person Det
 
 | Model | Purpose | Approx. Size | Source |
 |-------|---------|-------------|--------|
-| `yolov8n.pt` (COCO) | Supplementary person detector | ~6.5 MB | Ultralytics (COCO pretrained) |
-| `helmet_detector.pt` | Rider + helmet custom head detector | ~207.5 MB | Custom fine-tuned YOLOv8m |
+| `yolov8s.pt` (COCO) | Supplementary person detector | ~22.6 MB | Ultralytics (COCO pretrained) |
+| `helmet_detector.pt` | Rider + helmet custom head detector | ~22.5 MB | Custom fine-tuned YOLOv8s |
 | `plate_detector.pt` | Plate localization (reused via head model) | 0 MB | Reused from helmet detector plate class |
-| EasyOCR | Text recognition | ~100 MB | EasyOCR pretrained |
+| EasyOCR | Text recognition | ~98.3 MB | EasyOCR pretrained (CRAFT + English) |
 
-**Total Model Memory footprint: ~214 MB (fully compliant with the 250 MB size limit)**
+**Total Model Memory footprint: ~143.4 MB (fully compliant with the 250 MB size limit)**
 
 ---
 
@@ -325,6 +325,6 @@ Our optimized **Hybrid YOLOv8m (Custom Head Detector) + YOLOv8n (COCO Person Det
 - **Step 4 — License Plate OCR:** ✅ Complete
 - **Step 5 — Violation Logic:** ✅ Complete
 - **Step 6 — Integration (solution.py):** ✅ Complete
-- **Step 7 — Testing & Validation:** ✅ Complete (86.67% accuracy)
+- **Step 7 — Testing & Validation:** ✅ Complete (85.00% accuracy)
 - **Step 8 — Download Script:** ✅ Complete
 - **Step 9 — Optimization & Tuning:** ✅ Complete

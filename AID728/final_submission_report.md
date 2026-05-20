@@ -43,7 +43,7 @@ graph TD
 To maximize accuracy and handle typical street scene challenges (occlusions, crowding, double-detections), we engineered three core spatial algorithms:
 
 ### 3.1 Upward-Biased COCO Person Association
-Crowding and spatial overlaps on motorcycles mean that a rider's head is frequently occluded or missed by head detectors. We leverage a secondary lightweight COCO `yolov8n.pt` person model. To ensure background pedestrians standing or walking near the motorcycle do not trigger false positive overloading violations, we restrict the COCO search region to:
+Crowding and spatial overlaps on motorcycles mean that a rider's head is frequently occluded or missed by head detectors. We leverage a secondary lightweight COCO `yolov8s.pt` person model. To ensure background pedestrians standing or walking near the motorcycle do not trigger false positive overloading violations, we restrict the COCO search region to:
 * **Horizontal bounds:** $\pm 5\%$ of the vehicle's width.
 * **Vertical bounds:** $+45\%$ above the vehicle, and $-5\%$ below.
 * **Overlap threshold:** $\ge 0.40$ (`box_overlap_ratio`).
