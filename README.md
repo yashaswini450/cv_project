@@ -1,16 +1,18 @@
-
 # Traffic Rule Violation Detection System 🚦
 
 A lightweight computer vision pipeline that detects two-wheeler traffic violations from single RGB street images. The system flags instances of triple riding and missing helmets, and automatically runs OCR to extract the license plate of any violating vehicle.
 
 ## 📋 What it Detects
-- **Triple Riding:** More than 2 riders on a single motorcycle/scooter.
-- **Helmet Violations:** One or more riders on the vehicle aren't wearing a helmet.
-- **Combined Violations:** Both of the above occurring simultaneously.
-- **License Plate Extraction:** Performs OCR on the number plate of *only* the violating vehicles.
+
+* **Triple Riding:** More than 2 riders on a single motorcycle/scooter.
+* **Helmet Violations:** One or more riders on the vehicle aren't wearing a helmet.
+* **Combined Violations:** Both of the above occurring simultaneously.
+* **License Plate Extraction:** Performs OCR on the number plate of *only* the violating vehicles.
 
 ### Output Format
+
 The system outputs a clean JSON response for downstream processing:
+
 ```json
 {
   "violations": [
@@ -21,6 +23,8 @@ The system outputs a clean JSON response for downstream processing:
     }
   ]
 }
+
+```
 
 ---
 
@@ -47,7 +51,7 @@ cv_project/
 │   ├── ocr.py               # License plate cropping and EasyOCR
 │   ├── violation_logic.py   # Rules engine for flagging
 │   └── utils.py             # Bounding box & IoU helpers
-├── solution.py              # ✅ Main entry point (TrafficViolationDetector)
+├── solution.py              # Main entry point (TrafficViolationDetector)
 ├── download_models.py       # Weight fetching script
 ├── test_solution.py         # Local evaluation script
 └── requirements.txt         
@@ -134,7 +138,3 @@ To ensure this project remains lightweight and deployable, the total model footp
 * **Occlusions:** Bounding box IoU logic ensures riders slightly hidden behind others are still mapped to the correct bike.
 * **Low Light/Blur:** CLAHE and basic image normalization are applied before inference to help with noisy nighttime images.
 * **Overlapping Vehicles:** NMS (Non-Maximum Suppression) is heavily utilized to prevent a single rider from being assigned to two bikes parked next to each other.
-
-```
-
-```
