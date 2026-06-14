@@ -1,4 +1,4 @@
-```markdown
+
 # Traffic Rule Violation Detection System 🚦
 
 A lightweight computer vision pipeline that detects two-wheeler traffic violations from single RGB street images. The system flags instances of triple riding and missing helmets, and automatically runs OCR to extract the license plate of any violating vehicle.
@@ -21,8 +21,6 @@ The system outputs a clean JSON response for downstream processing:
     }
   ]
 }
-
-```
 
 ---
 
